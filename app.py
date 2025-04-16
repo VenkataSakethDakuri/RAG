@@ -1,9 +1,12 @@
 import os
 import streamlit as st
+import pandas as pd
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
 from llama_index.llms.openai import OpenAI
 from llama_index.embeddings.openai import OpenAIEmbedding
 from dotenv import load_dotenv
+import datetime
+import io
 
 # Load environment variables
 load_dotenv()
@@ -37,6 +40,10 @@ data_dir = "C:\\Users\\DELL\\OneDrive\\Desktop\\VS CODE\\RAG\\data"
 
 # Create data directory if it doesn't exist
 os.makedirs(data_dir, exist_ok=True)
+
+# Create output directory for Excel files
+output_dir = os.path.join(os.path.dirname(data_dir), "output")
+os.makedirs(output_dir, exist_ok=True)
 
 # Document upload section
 st.title("Document RAG System")
@@ -76,6 +83,36 @@ def process_document(doc_path, questions):
     except Exception as e:
         st.error(f"Error processing document {os.path.basename(doc_path)}: {str(e)}")
         return None
+
+# Function to save results to Excel
+def save_results_to_excel(all_results):
+    try:
+        # Create dataframe with document names as index
+        df = pd.DataFrame(index=all_results.keys())
+        
+        # Add columns for each question
+        for question in fixed_questions:
+            # Extract answers for this question from all documents
+            df[question] = [all_results[doc].get(question, "") for doc in all_results.keys()]
+        
+        # Generate timestamp for filename
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        excel_filename = f"document_answers_{timestamp}.xlsx"
+        excel_path = os.path.join(output_dir, excel_filename)
+        
+        # Save to Excel file
+        df.to_excel(excel_path)
+        
+        # Also create a downloadable version for the user
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+            df.to_excel(writer, sheet_name="Document Answers")
+        excel_buffer.seek(0)
+        
+        return excel_path, excel_buffer, excel_filename
+    except Exception as e:
+        st.error(f"Error creating Excel file: {str(e)}")
+        return None, None, None
 
 # Start processing button
 if st.button("Start Processing Documents"):
@@ -118,4 +155,19 @@ if st.button("Start Processing Documents"):
                 
                 all_results[doc_file] = results
         
-        st.success("All documents processed successfully!")
+        if all_results:
+            st.success("All documents processed successfully!")
+            
+            # Save results to Excel
+            excel_path, excel_buffer, excel_filename = save_results_to_excel(all_results)
+            
+            if excel_path:
+                st.success(f"Results saved to Excel file: {excel_path}")
+                
+                # Add download button
+                st.download_button(
+                    label="Download Excel Report",
+                    data=excel_buffer,
+                    file_name=excel_filename,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
