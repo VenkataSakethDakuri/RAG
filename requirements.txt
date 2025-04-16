@@ -1,0 +1,7 @@
+llama-index
+llama-index-llms-openai
+llama-index-readers-file
+pypdf
+python-dotenv
+pillow
+pdfminer.six
