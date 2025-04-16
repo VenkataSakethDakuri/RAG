@@ -5,3 +5,6 @@ pypdf
 python-dotenv
 pillow
 pdfminer.six
+streamlit
+pandas
+openpyxl
