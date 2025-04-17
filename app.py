@@ -54,6 +54,13 @@ if uploaded_files:
     st.write(f"Uploaded {len(uploaded_files)} document(s)")
 
 
+
+#Questions to ask the model
+# You can modify these questions as per your requirements
+# These questions will be asked to the model for each document
+# You can also add more questions to this list
+# The model will answer these questions based on the content of the documents
+# You can also use a different set of questions for each document if needed
 fixed_questions = [
     "What is the main topic of this document?",
     "What are the key points discussed?",
