@@ -27,7 +27,9 @@ os.environ["OPENAI_API_KEY"] = api_key
 
 @st.cache_resource
 def initialize_models():
-    llm = OpenAI(model="gpt-4o-mini", temperature=0.1)
+    llm = OpenAI(system_prompt = "Give numerical answers only wehever applicable without text, if required information is not there return NULL as answer", model="gpt-4o-mini", temperature=0.1)
+    
+
     embed_model = OpenAIEmbedding(model="text-embedding-3-small", dimensions=1536)
     Settings.llm = llm
     Settings.embed_model = embed_model
@@ -77,6 +79,8 @@ def process_document(doc_path, questions):
         
         index = VectorStoreIndex.from_documents(documents)
         query_engine = index.as_query_engine(similarity_top_k=3, response_mode="compact")
+        query_engine = index.as_query_engine(
+            similarity_top_k=3, response_mode="compact")
         
         
         results = {}
