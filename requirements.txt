@@ -8,3 +8,6 @@ pdfminer.six
 streamlit
 pandas
 openpyxl
+llama-parse
+nest-asyncio
+
