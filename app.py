@@ -1,106 +1,114 @@
 import os
+
 import streamlit as st
+st.set_page_config(page_title="University Document RAG with ChromaDB", layout="wide")
 import pandas as pd
-from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
+from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings, StorageContext
 from llama_index.llms.openai import OpenAI
 from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.vector_stores.chroma import ChromaVectorStore
 from dotenv import load_dotenv
 import datetime
 import io
-# Add LlamaParse imports
+import chromadb
+import shutil
 from llama_parse import LlamaParse
 import nest_asyncio
 
 nest_asyncio.apply()
-
 load_dotenv()
 
-st.set_page_config(page_title="Document RAG System with LlamaParse", layout="wide")
+# Initialize ChromaDB client and collection
+@st.cache_resource
+def initialize_chroma():
+    try:
+        # Define the path for ChromaDB
+        chroma_path = "./chroma_db"
+        # Create a persistent client
+        chroma_client = chromadb.PersistentClient(path=chroma_path)
+        # Create or get collection
+        chroma_collection = chroma_client.get_or_create_collection("university_stats")
+        return chroma_client, chroma_collection, chroma_path
+    except Exception as e:
+        st.error(f"Error initializing ChromaDB: {str(e)}")
+        return None, None, None
+
+chroma_client, chroma_collection, chroma_path = initialize_chroma()
 
 
+
+# API Key Handling
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
-    api_key = st.text_input("Enter your OpenAI API Key:", type="password")
+    api_key = st.text_input("Enter OpenAI API Key:", type="password")
     if not api_key:
-        st.warning("Please enter your OpenAI API Key to continue.")
+        st.warning("Please enter OpenAI API Key")
         st.stop()
     
 os.environ["OPENAI_API_KEY"] = api_key
 
-
 llama_api_key = os.getenv("LLAMAPARSE_API_KEY")
 if not llama_api_key:
-    llama_api_key = st.text_input("Enter your LlamaParse API Key:", type="password")
+    llama_api_key = st.text_input("Enter LlamaParse API Key:", type="password")
     if not llama_api_key:
-        st.warning("Please enter your LlamaParse API Key to continue.")
+        st.warning("Please enter LlamaParse API Key")
         st.stop()
 
+# Model Initialization
 @st.cache_resource
 def initialize_models():
-    llm = OpenAI(system_prompt = """
-You are an expert at analyzing Excel data across multiple sheets. 
-Examine all available information thoroughly before responding.
-Extract precise numerical answers from any sheet when available and give only the numerical answer dont give any text.... Only return NULL if after comprehensive search, the information is truly absent.
-""", model="gpt-4o-mini", temperature=0.1)
+    llm = OpenAI(
+        system_prompt="""Extract precise numerical answers from university documents. 
+        Return ONLY the number without additional text. Return NULL if unavailable after thorough search.""",
+        model="gpt-4o-mini",
+        temperature=0.0
+    )
     
-    embed_model = OpenAIEmbedding(model="text-embedding-3-small", dimensions=1536)
+    embed_model = OpenAIEmbedding(model="text-embedding-3-large", dimensions=3072)
     Settings.llm = llm
     Settings.embed_model = embed_model
     return llm, embed_model
 
 llm, embed_model = initialize_models()
 
+# File Paths
+data_dir = "./data"
+os.makedirs(data_dir, exist_ok=True)
+output_dir = "./output"
+os.makedirs(output_dir, exist_ok=True)
 
+# UI Components
+st.title("University Stats RAG with ChromaDB")
+st.header("Upload Documents")
+
+# Document Processing
 @st.cache_resource
 def initialize_parser():
-    parser = LlamaParse(
+    return LlamaParse(
         api_key=llama_api_key,
-        result_type="markdown",  # "markdown" provides better structure preservation
+        result_type="markdown",
         verbose=True,
-        num_workers=4  # For batch processing multiple files
+        num_workers=4
     )
-    return parser
 
 parser = initialize_parser()
 
-data_dir = "C:\\Users\\DELL\\OneDrive\\Desktop\\VS CODE\\RAG\\data"
-os.makedirs(data_dir, exist_ok=True)
+# Function to reset ChromaDB
+def reset_chroma_db():
+    try:
+        if os.path.exists(chroma_path):
+            # Delete the ChromaDB directory
+            #shutil.rmtree(chroma_path)
+            st.success("ChromaDB reset successfully")
+        
+        # Reinitialize ChromaDB
+        new_client, new_collection, _ = initialize_chroma()
+        return new_client, new_collection
+    except Exception as e:
+        st.error(f"Error resetting ChromaDB: {str(e)}")
+        return None, None
 
-output_dir = os.path.join(os.path.dirname(data_dir), "output")
-os.makedirs(output_dir, exist_ok=True)
-
-st.title("Document RAG System with LlamaParse")
-st.header("Upload Documents")
-
-
-st.info("""
-This system uses LlamaParse for enhanced document parsing. Supported file types include:
-- PDF documents (.pdf)
-- Excel spreadsheets (.xlsx, .xls, .xlsm, .xlsb, .csv, .tsv, .numbers)
-- Word documents (.docx, .doc, .docm, .rtf)
-- PowerPoint presentations (.pptx, .ppt, .pptm)
-- Text files (.txt)
-- Image files (.jpg, .png, .gif, etc.)
-- And many more!
-""")
-
-uploaded_files = st.file_uploader(
-    "Upload documents", 
-    accept_multiple_files=True, 
-    type=["pdf", "txt", "docx", "doc", "xlsx", "xls", "csv", "pptx", "ppt", "rtf", "xlsm", "xlsb", "jpg", "png"]
-)
-
-if uploaded_files:
-    st.write(f"Uploaded {len(uploaded_files)} document(s)")
-
-
-
-#Questions to ask the model
-# You can modify these questions as per your requirements
-# These questions will be asked to the model for each document
-# You can also add more questions to this list
-# The model will answer these questions based on the content of the documents
-# You can also use a different set of questions for each document if needed
+# Fixed questions array
 fixed_questions = [
     "Name of College or University",
     
@@ -211,97 +219,60 @@ fixed_questions = [
     "Top 5 number of degrees conferred(names) along with their respective number of degrees conferred or percent of total degrees conferred", 
 ]
 
-
-def process_document(doc_path, questions):
+def process_document(doc_path, questions, client, collection):
     try:
-        
-        file_extractor = {
-           
-            ".pdf": parser,
-            ".txt": parser,
-            ".rtf": parser,
-            
-            
-            ".doc": parser,
-            ".docx": parser,
-            ".docm": parser,
-            
-            ".xlsx": parser,
-            ".xls": parser,
-            ".xlsm": parser,
-            ".xlsb": parser,
-            ".csv": parser,
-            ".tsv": parser,
-            ".numbers": parser,
-            
-            ".ppt": parser,
-            ".pptx": parser,
-            ".pptm": parser,
-           
-            ".jpg": parser,
-            ".jpeg": parser,
-            ".png": parser,
-            ".gif": parser,
-            ".bmp": parser,
-            ".svg": parser,
-            ".tiff": parser,
-            ".webp": parser,
-            
-            # Web formats
-            ".html": parser,
-            ".xml": parser,
-        }
-        
+        file_extractor = {ext: parser for ext in [
+            ".pdf", ".txt", ".docx", ".xlsx", ".pptx", ".jpg", ".png"
+        ]}
         
         file_extension = os.path.splitext(doc_path)[1].lower()
-        st.info(f"Using LlamaParse for parsing: {os.path.basename(doc_path)}")
-   
-        with st.spinner(f"Parsing document: {os.path.basename(doc_path)}"):
+        with st.spinner(f"Parsing {os.path.basename(doc_path)}"):
             documents = SimpleDirectoryReader(
                 input_files=[doc_path], 
                 file_extractor=file_extractor
             ).load_data()
+
+        # Create vector store with ChromaDB
+        vector_store = ChromaVectorStore(chroma_collection=collection)
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
         
-        st.success(f"Document parsed successfully: {os.path.basename(doc_path)}")
+        # Create index with Chroma storage
+        with st.spinner("Creating vector index with ChromaDB..."):
+            index = VectorStoreIndex.from_documents(
+                documents,
+                storage_context=storage_context,
+                show_progress=True
+            )
         
+        query_engine = index.as_query_engine(similarity_top_k=5)
         
-        index = VectorStoreIndex.from_documents(documents)
-        query_engine = index.as_query_engine(
-            similarity_top_k=5, response_mode="compact")
-     
         results = {}
         for question in questions:
-            with st.spinner(f"Answering: {question}"):
+            with st.spinner(f"Processing: {question}"):
                 response = query_engine.query(question)
                 results[question] = str(response)
         
         return results
     except Exception as e:
-        st.error(f"Error processing document {os.path.basename(doc_path)}: {str(e)}")
+        st.error(f"Error: {str(e)}")
         return None
 
 def save_results_to_excel(all_results):
     try:
-        
         df = pd.DataFrame(index=all_results.keys())
         
-    
         for question in fixed_questions:
-            
             df[question] = [all_results[doc].get(question, "") for doc in all_results.keys()]
         
-
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        excel_filename = f"document_answers_{timestamp}.xlsx"
+        excel_filename = f"university_stats_{timestamp}.xlsx"
         excel_path = os.path.join(output_dir, excel_filename)
         
-    
         df.to_excel(excel_path)
-        
         
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
-            df.to_excel(writer, sheet_name="Document Answers")
+            df.to_excel(writer, sheet_name="University Stats")
         excel_buffer.seek(0)
         
         return excel_path, excel_buffer, excel_filename
@@ -309,18 +280,37 @@ def save_results_to_excel(all_results):
         st.error(f"Error creating Excel file: {str(e)}")
         return None, None, None
 
+# File uploader
+st.info("""
+This system uses LlamaParse for enhanced document parsing and ChromaDB for vector storage. Supported file types include:
+- PDF documents (.pdf)
+- Excel spreadsheets (.xlsx, .xls, .csv)
+- Word documents (.docx, .doc)
+- PowerPoint presentations (.pptx, .ppt)
+- Text files (.txt)
+- Image files (.jpg, .png)
+""")
+
+uploaded_files = st.file_uploader(
+    "Upload university documents", 
+    accept_multiple_files=True, 
+    type=["pdf", "txt", "docx", "xlsx", "pptx", "jpg", "png"]
+)
+
+if uploaded_files:
+    st.write(f"Uploaded {len(uploaded_files)} document(s)")
+
 if st.button("Start Processing Documents"):
     if not uploaded_files:
         st.warning("No documents uploaded. Please upload documents first.")
     else:
-        
         with st.spinner("Saving documents to data folder..."):
-          
+            # Clear data directory
             for file in os.listdir(data_dir):
                 file_path = os.path.join(data_dir, file)
                 if os.path.isfile(file_path):
                     os.remove(file_path)
-           
+            
             saved_files = []
             for uploaded_file in uploaded_files:
                 file_path = os.path.join(data_dir, uploaded_file.name)
@@ -330,13 +320,17 @@ if st.button("Start Processing Documents"):
             
             st.success(f"Successfully saved {len(uploaded_files)} document(s) to {data_dir}")
         
-       
         all_results = {}
         for doc_path in saved_files:
             doc_file = os.path.basename(doc_path)
-            st.subheader(f"Processing with LlamaParse: {doc_file}")
-          
-            results = process_document(doc_path, fixed_questions)
+            st.subheader(f"Processing: {doc_file}")
+            
+            # Reset ChromaDB between documents
+            st.info("Resetting ChromaDB for new document...")
+            chroma_client, chroma_collection = reset_chroma_db()
+            
+            # Process document with fresh ChromaDB
+            results = process_document(doc_path, fixed_questions, chroma_client, chroma_collection)
             
             if results:
                 # Display results for this document
@@ -355,7 +349,6 @@ if st.button("Start Processing Documents"):
             
             if excel_path:
                 st.success(f"Results saved to Excel file: {excel_path}")
-                
                 
                 st.download_button(
                     label="Download Excel Report",
