@@ -1,58 +1,73 @@
 import os
-
 import streamlit as st
-st.set_page_config(page_title="University Document RAG with ChromaDB", layout="wide")
 import pandas as pd
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings, StorageContext
 from llama_index.llms.openai import OpenAI
 from llama_index.embeddings.openai import OpenAIEmbedding
-from llama_index.vector_stores.chroma import ChromaVectorStore
+from llama_index.vector_stores.qdrant import QdrantVectorStore
 from dotenv import load_dotenv
 import datetime
 import io
-import chromadb
-import shutil
+import qdrant_client
 from llama_parse import LlamaParse
 import nest_asyncio
+import shutil
 
+# Apply nest_asyncio for async operations
 nest_asyncio.apply()
 load_dotenv()
 
-# Initialize ChromaDB client and collection
+# Must be the first Streamlit command
+st.set_page_config(page_title="University Document RAG with Qdrant", layout="wide")
+
+# Initialize Qdrant client and collection
 @st.cache_resource
-def initialize_chroma():
+def initialize_qdrant():
     try:
-        # Define the path for ChromaDB
-        chroma_path = "./chroma_db"
-        # Create a persistent client
-        chroma_client = chromadb.PersistentClient(path=chroma_path)
+        # Define the path for Qdrant DB
+        qdrant_path = "./qdrant_db"
+        # Create a client (local)
+        client = qdrant_client.QdrantClient(path=qdrant_path)
         # Create or get collection
-        chroma_collection = chroma_client.get_or_create_collection("university_stats")
-        return chroma_client, chroma_collection, chroma_path
+        collection_name = "university_stats"
+        # Check if collection exists, if not create it
+        collections = client.get_collections().collections
+        collection_names = [collection.name for collection in collections]
+        
+        if collection_name not in collection_names:
+            # Create new collection
+            client.create_collection(
+                collection_name=collection_name,
+                vectors_config=qdrant_client.http.models.VectorParams(
+                    size=3072,  # Dimensions for text-embedding-3-large
+                    distance=qdrant_client.http.models.Distance.COSINE
+                )
+            )
+        
+        return client, collection_name, qdrant_path
     except Exception as e:
-        st.error(f"Error initializing ChromaDB: {str(e)}")
+        st.error(f"Error initializing Qdrant: {str(e)}")
         return None, None, None
-
-chroma_client, chroma_collection, chroma_path = initialize_chroma()
-
-
 
 # API Key Handling
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
-    api_key = st.text_input("Enter OpenAI API Key:", type="password")
+    api_key = st.text_input("Enter your OpenAI API Key:", type="password")
     if not api_key:
-        st.warning("Please enter OpenAI API Key")
+        st.warning("Please enter your OpenAI API Key to continue.")
         st.stop()
     
 os.environ["OPENAI_API_KEY"] = api_key
 
 llama_api_key = os.getenv("LLAMAPARSE_API_KEY")
 if not llama_api_key:
-    llama_api_key = st.text_input("Enter LlamaParse API Key:", type="password")
+    llama_api_key = st.text_input("Enter your LlamaParse API Key:", type="password")
     if not llama_api_key:
-        st.warning("Please enter LlamaParse API Key")
+        st.warning("Please enter your LlamaParse API Key to continue.")
         st.stop()
+
+# Initialize Qdrant
+qdrant_client, collection_name, qdrant_path = initialize_qdrant()
 
 # Model Initialization
 @st.cache_resource
@@ -71,15 +86,20 @@ def initialize_models():
 
 llm, embed_model = initialize_models()
 
-# File Paths
-data_dir = "./data"
-os.makedirs(data_dir, exist_ok=True)
-output_dir = "./output"
-os.makedirs(output_dir, exist_ok=True)
-
-# UI Components
-st.title("University Stats RAG with ChromaDB")
-st.header("Upload Documents")
+# Function to reset Qdrant DB
+def reset_qdrant_db():
+    try:
+        if os.path.exists(qdrant_path):
+            # Delete the Qdrant directory
+            
+            st.success("Qdrant DB reset successfully")
+        
+        # Reinitialize Qdrant
+        new_client, new_collection_name, _ = initialize_qdrant()
+        return new_client, new_collection_name
+    except Exception as e:
+        st.error(f"Error resetting Qdrant DB: {str(e)}")
+        return None, None
 
 # Document Processing
 @st.cache_resource
@@ -93,22 +113,27 @@ def initialize_parser():
 
 parser = initialize_parser()
 
-# Function to reset ChromaDB
-def reset_chroma_db():
-    try:
-        if os.path.exists(chroma_path):
-            # Delete the ChromaDB directory
-            #shutil.rmtree(chroma_path)
-            st.success("ChromaDB reset successfully")
-        
-        # Reinitialize ChromaDB
-        new_client, new_collection, _ = initialize_chroma()
-        return new_client, new_collection
-    except Exception as e:
-        st.error(f"Error resetting ChromaDB: {str(e)}")
-        return None, None
+# File Paths
+data_dir = "./data"
+os.makedirs(data_dir, exist_ok=True)
+output_dir = "./output"
+os.makedirs(output_dir, exist_ok=True)
 
-# Fixed questions array
+# UI Components
+st.title("University Stats RAG with Qdrant")
+st.header("Upload Documents")
+
+st.info("""
+This system uses LlamaParse for enhanced document parsing and Qdrant for vector storage. Supported file types include:
+- PDF documents (.pdf)
+- Excel spreadsheets (.xlsx, .xls, .xlsm, .xlsb, .csv)
+- Word documents (.docx, .doc, .docm, .rtf)
+- PowerPoint presentations (.pptx, .ppt, .pptm)
+- Text files (.txt)
+- Image files (.jpg, .png, .gif)
+- And many more!
+""")
+
 fixed_questions = [
     "Name of College or University",
     
@@ -142,17 +167,17 @@ fixed_questions = [
     
     "Total first-time, first-year (degree seeking) who applied In-State",
     "Total first-time, first-year (degree seeking) who applied Out-of-State",
-    "Total first-time, first-year (degree seeking) who applied international",
+    "Total first-time, first-year (degree seeking) who applied International",
     "Total first-time, first-year (degree seeking) who applied",
     
     "Total first-time, first-year (degree seeking) who were admitted In-State",
     "Total first-time, first-year (degree seeking) who were admitted Out-of-State",
-    "Total first-time, first-year (degree seeking) who were admitted international",
+    "Total first-time, first-year (degree seeking) who were admitted International",
     "Total first-time, first-year (degree seeking) who were admitted",
     
     "Total first-time, first-year (degree seeking) enrolled In-State",
     "Total first-time, first-year (degree seeking) enrolled Out-of-State",
-    "Total first-time, first-year (degree seeking) enrolled international",
+    "Total first-time, first-year (degree seeking) enrolled International",
     "Total first-time, first-year (degree seeking) enrolled",
     
     "Number of qualified applicants offered a place on waiting list",
@@ -216,10 +241,10 @@ fixed_questions = [
     
     "Number of applicants enrolled under early action plan",
     
-    "Top 5 number of degrees conferred(names) along with their respective number of degrees conferred or percent of total degrees conferred", 
+    "give me the names of Top 5 number of degrees conferred along with their respective number of degrees conferred or percent of total degrees conferred", 
 ]
 
-def process_document(doc_path, questions, client, collection):
+def process_document(doc_path, questions, client, coll_name):
     try:
         file_extractor = {ext: parser for ext in [
             ".pdf", ".txt", ".docx", ".xlsx", ".pptx", ".jpg", ".png"
@@ -232,12 +257,12 @@ def process_document(doc_path, questions, client, collection):
                 file_extractor=file_extractor
             ).load_data()
 
-        # Create vector store with ChromaDB
-        vector_store = ChromaVectorStore(chroma_collection=collection)
+        # Create vector store with Qdrant
+        vector_store = QdrantVectorStore(client=client, collection_name=coll_name)
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
         
-        # Create index with Chroma storage
-        with st.spinner("Creating vector index with ChromaDB..."):
+        # Create index with Qdrant storage
+        with st.spinner("Creating vector index with Qdrant..."):
             index = VectorStoreIndex.from_documents(
                 documents,
                 storage_context=storage_context,
@@ -281,16 +306,6 @@ def save_results_to_excel(all_results):
         return None, None, None
 
 # File uploader
-st.info("""
-This system uses LlamaParse for enhanced document parsing and ChromaDB for vector storage. Supported file types include:
-- PDF documents (.pdf)
-- Excel spreadsheets (.xlsx, .xls, .csv)
-- Word documents (.docx, .doc)
-- PowerPoint presentations (.pptx, .ppt)
-- Text files (.txt)
-- Image files (.jpg, .png)
-""")
-
 uploaded_files = st.file_uploader(
     "Upload university documents", 
     accept_multiple_files=True, 
@@ -325,12 +340,12 @@ if st.button("Start Processing Documents"):
             doc_file = os.path.basename(doc_path)
             st.subheader(f"Processing: {doc_file}")
             
-            # Reset ChromaDB between documents
-            st.info("Resetting ChromaDB for new document...")
-            chroma_client, chroma_collection = reset_chroma_db()
+            # Reset Qdrant DB between documents
+            st.info("Resetting Qdrant DB for new document...")
+            qdrant_client, collection_name = reset_qdrant_db()
             
-            # Process document with fresh ChromaDB
-            results = process_document(doc_path, fixed_questions, chroma_client, chroma_collection)
+            # Process document with fresh Qdrant DB
+            results = process_document(doc_path, fixed_questions, qdrant_client, collection_name)
             
             if results:
                 # Display results for this document
