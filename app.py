@@ -91,7 +91,7 @@ def reset_qdrant_db():
     try:
         if os.path.exists(qdrant_path):
             # Delete the Qdrant directory
-            
+            #shutil.rmtree(qdrant_path)
             st.success("Qdrant DB reset successfully")
         
         # Reinitialize Qdrant
@@ -191,45 +191,14 @@ fixed_questions = [
     "Number of first-time, first-year students enrolled who submitted national standardized SAT test scores",
     "Number of first-time, first-year students enrolled who submitted national standardized ACT test scores",
     
-    """For each assessment listed below, report the score that represents the 25th percentile, 50th percentile and the 75th percentile score.,
-    SAT Composite (400 - 1600),
-    SAT Evidence-Based Reading and Writing (200 - 800),
-    SAT Math (200 - 800),
-    ACT Composite (0 - 36),
-    ACT Math (0 - 36),
-    ACT English (0 - 36),
-    ACT Reading (0 - 36),
-    ACT Science (0 - 36),
-    ACT Writing (0 - 36)""",
+  "What is the 25th, 50th, 75th percentile SAT Composite(400-1600) score ?",
+  "What is the 25th, 50th, 75th percentile ACT Composite(0-36) score ?"
     
     "Give the following in tabular format : Score Range, SAT Evidence-Based Reading and Writing, SAT Math",
     "Give the following in tabular format : Score Range, SAT Composite",
     "Give the following in tabular format : Score Range, ACT Composite",
     "Give the following in tabular format : Score Range, ACT English, ACT Math, ACT Reading, ACT Science",
     
-    """Percent of all degree-seeking, first-time, first-year students who had high school class rank within each of the following ranges,
-    Percent in top tenth of high school graduating class,
-    Percent in top quarter of high school graduating class,
-    Percent in top half of high school graduating class,
-    Percent in bottom half of high school graduating class,
-    Percent in bottom quarter of high school graduating class,
-    Percent of total first-time, first-year students who submitted high school class rank""",
-    
-    """Percentage of all enrolled, degree-seeking, first-time, first-year students who had high school grade-point averages within each of the following ranges (using 4.0 scale).,
-    Give these 3 columns for the score ranges listed below : Percent of students who submitted scores, Percent of students who did not submit scores, Percent of all enrolled students",
-    Percent who had GPA of 4.0",
-    Percent who had GPA between 3.75 and 3.99,
-    Percent who had GPA between 3.50 and 3.74,
-    Percent who had GPA between 3.25 and 3.49,
-    Percent who had GPA between 3.00 and 3.24,
-    Percent who had GPA between 2.50 and 2.99,
-    Percent who had GPA between 2.0 and 2.49,
-    Percent who had GPA between 1.0 and 1.99,
-    Percent who had GPA below 1.0""",
-    
-    "Average high school GPA of all degree-seeking, first-time, first-year students who submitted GPA",
-    
-    "Percent of total first-time, first-year students who submitted high school GPA",
     
     "Number of early decision applications received by your institution",
     
